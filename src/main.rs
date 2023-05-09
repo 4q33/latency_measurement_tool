@@ -28,6 +28,10 @@ struct Args {
     /// Path for pcap file on outbound interface
     #[arg(name = "PCAP FILE OUT")]
     out_interface_pcap_file_path: String,
+    
+    /// Disable output of latency/miss for every packet
+    #[arg(short = 'p', long = "disable-printing")]
+    disable_printing: bool
 }
 
 #[derive(Eq, PartialEq, Hash, Debug)]
@@ -131,16 +135,19 @@ fn main() {
         out_interface_table.insert(tuple_id, packet_time);
     }
 
-    let in_interface_reader = PcapReader::new_from_path(&args.out_interface_pcap_file_path);
+    let in_interface_reader = PcapReader::new_from_path(&args.in_interface_pcap_file_path);
 
     let mut latency_sum: i64 = 0;
     let mut latency_min: i64 = i64::MAX;
     let mut latency_max: i64 = 0;
     let mut latency_hit_count: i64 = 0;
-    let mut miss_count: u32 = 0;
+    let mut miss_count: u64 = 0;
+    let mut in_interface_packet_count: u64 = 0;
     for (tuple_id, packet_time) in in_interface_reader.into_iter() {
+        in_interface_packet_count += 1;
         if let Some(out_interface_time) = out_interface_table.remove(&tuple_id) {
             let latency = PacketTime::diff(out_interface_time, packet_time);
+            if !args.disable_printing { println!("{}", latency) };
             latency_sum += latency.abs();
             latency_hit_count += 1;
             if latency.abs() < latency_min {
@@ -149,16 +156,18 @@ fn main() {
             if latency.abs() > latency_max {
                 latency_max = latency
             }
-            println!("{:?}", latency);
+            
         } else {
             miss_count += 1;
-            println!("miss")
+            if !args.disable_printing { println!("miss") }
         }
     }
     println!(
-        "Average latency (usec): {}. Jitter (usec): {}. Misses count: {}",
+        "Average latency (usec): {}. Jitter (usec): {}. Packets count: {}. Misses count: {} ({}%)",
         latency_sum / latency_hit_count,
         latency_max - latency_min,
-        miss_count
+        in_interface_packet_count,
+        miss_count,
+        miss_count as f64 / in_interface_packet_count as f64 * 100f64
     );
 }
