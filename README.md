@@ -1,7 +1,10 @@
 # Latency measurement tool
 Small application for measuring latency of network packets by comparing time of packets in pcap files.
 
+According to RFC 1242:
+```
 Latency = < timestamp of packet in pcap file 1 > minus < timestamp of identical packet in pcap file 2 >
+```
 
 Identical packets = TCP packets with identical source IP, destination IP, source port, destination port, sequence number, acknoledgement number. 
 
