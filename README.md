@@ -25,7 +25,7 @@ Identical packets = TCP packets with identical source IP, destination IP, source
 │    └─┤                      ├─┘    │
 │      │                      │      │
 │      └──────────────────────┘      │
-│                                    │                        ┼
+│                                    │
 │                                    │
 │      ┌──────────────────────┐      │
 │  if1 │                      │ if2  │
