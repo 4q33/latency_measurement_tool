@@ -35,7 +35,7 @@ struct Args {
 }
 
 #[derive(Eq, PartialEq, Hash, Debug)]
-struct TupleId {
+struct TcpTupleId {
     ip_src: Ipv4Addr,
     ip_dst: Ipv4Addr,
     port_src: u16,
@@ -44,7 +44,7 @@ struct TupleId {
     tcp_ack: u32,
 }
 
-impl TupleId {
+impl TcpTupleId {
     fn new_from_bytes(bytes: &[u8]) -> Option<Self> {
         let l2 = EthernetPacket::new(bytes)?;
         let l3 = Ipv4Packet::new(l2.payload())?;
@@ -91,18 +91,18 @@ impl PcapReader {
 }
 
 impl Iterator for PcapReader {
-    type Item = (TupleId, PacketTime);
+    type Item = (TcpTupleId, PacketTime);
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            let mut tuple_id: Option<TupleId> = None;
+            let mut tuple_id: Option<TcpTupleId> = None;
             let mut time: PacketTime = PacketTime { sec: 0, usec: 0 };
             match self.reader.next() {
                 Ok((offset, block)) => {
                     match block {
                         PcapBlockOwned::LegacyHeader(_hdr) => {}
                         PcapBlockOwned::Legacy(_b) => {
-                            tuple_id = TupleId::new_from_bytes(_b.data);
+                            tuple_id = TcpTupleId::new_from_bytes(_b.data);
                             time = PacketTime {
                                 sec: _b.ts_sec,
                                 usec: _b.ts_usec,
@@ -130,7 +130,7 @@ fn main() {
     let args = Args::parse();
 
     let out_interface_reader = PcapReader::new_from_path(&args.out_interface_pcap_file_path);
-    let mut out_interface_table: HashMap<TupleId, PacketTime> = HashMap::new();
+    let mut out_interface_table: HashMap<TcpTupleId, PacketTime> = HashMap::new();
     for (tuple_id, packet_time) in out_interface_reader.into_iter() {
         out_interface_table.insert(tuple_id, packet_time);
     }
