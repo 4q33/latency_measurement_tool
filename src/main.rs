@@ -17,7 +17,11 @@ use std::net::Ipv4Addr;
     long_about = r###"Application parses pcap-files:
 - inbound = dump of packets which are sent to something
 - outbound = dump of packets which are received from something
-Identical packets - TCP packets with identical source IP, destination IP, source port, destination port, sequence number and acknoledgement.
+
+Identical packets:
+- TCP packets with identical source IP, destination IP, source port, destination port, sequence number and acknoledgement;
+- ICMP packets with identical source IP, destination IP, checksum.
+
 Measured latency - difference between timestamp of identical packet in inbound and outbound dumps.
 "###
 )]
@@ -148,6 +152,7 @@ impl Iterator for PcapReader {
         }
     }
 }
+
 
 fn main() {
     let args = Args::parse();
