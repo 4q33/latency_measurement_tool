@@ -2,7 +2,9 @@ use clap::Parser;
 use pcap_parser::traits::PcapReaderIterator;
 use pcap_parser::*;
 use pnet::packet::ethernet::EthernetPacket;
+use pnet::packet::icmp::IcmpPacket;
 use pnet::packet::ipv4::Ipv4Packet;
+use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::tcp::TcpPacket;
 use pnet::packet::Packet;
 use std::collections::HashMap;
@@ -35,34 +37,55 @@ struct Args {
 }
 
 #[derive(Eq, PartialEq, Hash, Debug)]
-struct TcpTupleId {
-    ip_src: Ipv4Addr,
-    ip_dst: Ipv4Addr,
-    port_src: u16,
-    port_dst: u16,
-    tcp_seq: u32,
-    tcp_ack: u32,
+enum PacketId {
+    Tcp {
+        ip_src: Ipv4Addr,
+        ip_dst: Ipv4Addr,
+        port_src: u16,
+        port_dst: u16,
+        tcp_seq: u32,
+        tcp_ack: u32,
+    },
+    Icmp{
+        ip_src: Ipv4Addr,
+        ip_dst: Ipv4Addr,
+        checksum: u16,
+    }
 }
 
-impl TcpTupleId {
+impl PacketId {
     fn new_from_bytes(bytes: &[u8]) -> Option<Self> {
         let l2 = EthernetPacket::new(bytes)?;
         let l3 = Ipv4Packet::new(l2.payload())?;
-        let l4 = TcpPacket::new(l3.payload())?;
         let ip_src = l3.get_source();
         let ip_dst = l3.get_destination();
-        let tcp_seq = l4.get_sequence();
-        let tcp_ack = l4.get_acknowledgement();
-        let port_src = l4.get_source();
-        let port_dst = l4.get_destination();
-        Some(Self {
-            ip_src,
-            ip_dst,
-            port_src,
-            port_dst,
-            tcp_seq,
-            tcp_ack,
-        })
+        match l3.get_next_level_protocol() {
+            IpNextHeaderProtocols::Tcp => {
+                let l4 = TcpPacket::new(l3.payload()).unwrap();
+                let tcp_seq = l4.get_sequence();
+                let tcp_ack = l4.get_acknowledgement();
+                let port_src = l4.get_source();
+                let port_dst = l4.get_destination();
+                return Some(Self::Tcp {
+                    ip_src,
+                    ip_dst,
+                    port_src,
+                    port_dst,
+                    tcp_seq,
+                    tcp_ack,
+                })
+            }
+            IpNextHeaderProtocols::Icmp => {
+                let l4 = IcmpPacket::new(l3.payload()).unwrap();
+                let checksum = l4.get_checksum();
+                return Some(Self::Icmp {
+                    ip_src,
+                    ip_dst,
+                    checksum,
+                })
+            }
+            _ => return None
+        }
     }
 }
 
@@ -91,18 +114,18 @@ impl PcapReader {
 }
 
 impl Iterator for PcapReader {
-    type Item = (TcpTupleId, PacketTime);
+    type Item = (PacketId, PacketTime);
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            let mut tuple_id: Option<TcpTupleId> = None;
+            let mut tuple_id: Option<PacketId> = None;
             let mut time: PacketTime = PacketTime { sec: 0, usec: 0 };
             match self.reader.next() {
                 Ok((offset, block)) => {
                     match block {
                         PcapBlockOwned::LegacyHeader(_hdr) => {}
                         PcapBlockOwned::Legacy(_b) => {
-                            tuple_id = TcpTupleId::new_from_bytes(_b.data);
+                            tuple_id = PacketId::new_from_bytes(_b.data);
                             time = PacketTime {
                                 sec: _b.ts_sec,
                                 usec: _b.ts_usec,
@@ -130,7 +153,7 @@ fn main() {
     let args = Args::parse();
 
     let out_interface_reader = PcapReader::new_from_path(&args.out_interface_pcap_file_path);
-    let mut out_interface_table: HashMap<TcpTupleId, PacketTime> = HashMap::new();
+    let mut out_interface_table: HashMap<PacketId, PacketTime> = HashMap::new();
     for (tuple_id, packet_time) in out_interface_reader.into_iter() {
         out_interface_table.insert(tuple_id, packet_time);
     }
