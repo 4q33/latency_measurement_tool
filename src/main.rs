@@ -3,8 +3,8 @@ use pcap_parser::traits::PcapReaderIterator;
 use pcap_parser::*;
 use pnet::packet::ethernet::EthernetPacket;
 use pnet::packet::icmp::IcmpPacket;
-use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::ip::IpNextHeaderProtocols;
+use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::tcp::TcpPacket;
 use pnet::packet::Packet;
 use std::collections::HashMap;
@@ -20,7 +20,7 @@ use std::net::Ipv4Addr;
 
 Identical packets:
 - TCP packets with identical source IP, destination IP, source port, destination port, sequence number and acknoledgement;
-- ICMP packets with identical source IP, destination IP, checksum.
+- ICMP packets with identical source IP, destination IP and checksum.
 
 Measured latency - difference between timestamp of identical packet in inbound and outbound dumps.
 "###
@@ -34,14 +34,14 @@ struct Args {
     /// Path for pcap file on outbound interface
     #[arg(name = "PCAP FILE OUT")]
     out_interface_pcap_file_path: String,
-    
+
     /// Disable output of latency/miss for every packet
     #[arg(short = 'p', long = "disable-printing")]
     disable_printing: bool,
 
     /// Filter by byte value (byte_number:byte value)
     #[arg(short = 'f', long = "filter", num_args = 0.., value_delimiter = ' ')]
-    filter_strings: Vec<String>
+    filter_strings: Vec<String>,
 }
 
 #[derive(Eq, PartialEq, Hash, Debug)]
@@ -54,11 +54,11 @@ enum PacketId {
         tcp_seq: u32,
         tcp_ack: u32,
     },
-    Icmp{
+    Icmp {
         ip_src: Ipv4Addr,
         ip_dst: Ipv4Addr,
         checksum: u16,
-    }
+    },
 }
 
 impl PacketId {
@@ -81,7 +81,7 @@ impl PacketId {
                     port_dst,
                     tcp_seq,
                     tcp_ack,
-                })
+                });
             }
             IpNextHeaderProtocols::Icmp => {
                 let l4 = IcmpPacket::new(l3.payload()).unwrap();
@@ -90,9 +90,9 @@ impl PacketId {
                     ip_src,
                     ip_dst,
                     checksum,
-                })
+                });
             }
-            _ => return None
+            _ => return None,
         }
     }
 }
@@ -111,7 +111,7 @@ impl PacketTime {
 
 struct PcapReader {
     reader: LegacyPcapReader<File>,
-    filter: Vec<(usize, u8)>
+    filter: Vec<(usize, u8)>,
 }
 
 impl PcapReader {
@@ -121,12 +121,19 @@ impl PcapReader {
         Self { reader, filter }
     }
 
-    fn match_filter(bytes:&[u8], filter: &Vec<(usize, u8)>) -> bool {
-        if filter.len() == 0 { return true; }
+    fn match_filter(bytes: &[u8], filter: &Vec<(usize, u8)>) -> bool {
+        if filter.len() == 0 {
+            return true;
+        }
         for (byte_number, byte_value) in filter.into_iter() {
-            if bytes.len() <= *byte_number { return false; }
-            if bytes[*byte_number] == *byte_value { continue; }
-            else {return false;}
+            if bytes.len() <= *byte_number {
+                return false;
+            }
+            if bytes[*byte_number] == *byte_value {
+                continue;
+            } else {
+                return false;
+            }
         }
         return true;
     }
@@ -136,8 +143,7 @@ impl Iterator for PcapReader {
     type Item = (PacketId, PacketTime);
 
     fn next(&mut self) -> Option<Self::Item> {
-        //TODO: rewrite. Need to remove clone()
-        let filter = self.filter.clone();
+        let filter = &self.filter;
         loop {
             let mut tuple_id: Option<PacketId> = None;
             let mut time: PacketTime = PacketTime { sec: 0, usec: 0 };
@@ -146,7 +152,7 @@ impl Iterator for PcapReader {
                     match block {
                         PcapBlockOwned::LegacyHeader(_hdr) => {}
                         PcapBlockOwned::Legacy(_b) => {
-                            if PcapReader::match_filter(_b.data, &filter) {
+                            if PcapReader::match_filter(_b.data, filter) {
                                 tuple_id = PacketId::new_from_bytes(_b.data);
                                 time = PacketTime {
                                     sec: _b.ts_sec,
@@ -172,12 +178,19 @@ impl Iterator for PcapReader {
     }
 }
 
-
 fn main() {
     let args = Args::parse();
     //TODO: rewrite. Need to be parsed with CLAP
-    let filter = args.filter_strings.into_iter().map(|x| {let (a, b) = x.split_once(':').unwrap(); (a.parse::<usize>().unwrap(), b.parse::<u8>().unwrap())}).collect::<Vec<_>>();
-    let out_interface_reader = PcapReader::new_from_path(&args.out_interface_pcap_file_path, filter.clone());
+    let filter = args
+        .filter_strings
+        .into_iter()
+        .map(|x| {
+            let (a, b) = x.split_once(':').unwrap();
+            (a.parse::<usize>().unwrap(), b.parse::<u8>().unwrap())
+        })
+        .collect::<Vec<_>>();
+    let out_interface_reader =
+        PcapReader::new_from_path(&args.out_interface_pcap_file_path, filter.clone());
     let mut out_interface_table: HashMap<PacketId, PacketTime> = HashMap::new();
     for (tuple_id, packet_time) in out_interface_reader.into_iter() {
         out_interface_table.insert(tuple_id, packet_time);
@@ -195,7 +208,9 @@ fn main() {
         in_interface_packet_count += 1;
         if let Some(out_interface_time) = out_interface_table.remove(&tuple_id) {
             let latency = PacketTime::diff(out_interface_time, packet_time);
-            if !args.disable_printing { println!("{}", latency) };
+            if !args.disable_printing {
+                println!("{}", latency)
+            };
             latency_sum += latency.abs();
             latency_hit_count += 1;
             if latency.abs() < latency_min {
@@ -204,10 +219,11 @@ fn main() {
             if latency.abs() > latency_max {
                 latency_max = latency
             }
-            
         } else {
             miss_count += 1;
-            if !args.disable_printing { println!("miss") }
+            if !args.disable_printing {
+                println!("miss")
+            }
         }
     }
     println!(
